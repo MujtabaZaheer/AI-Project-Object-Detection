@@ -1,0 +1,7 @@
+train: /home/mujtaba/Documents/BSE231010/Dataset/train/images
+
+val: /home/mujtaba/Documents/BSE231010/Dataset/val/images
+
+nc: 7
+
+names: ['person' , 'book' , 'cellphone','book','bottle','chair','laptop']

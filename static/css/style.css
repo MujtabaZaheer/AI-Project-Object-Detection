@@ -1,0 +1,287 @@
+        :root {
+            --primary-color: #007bff;
+            --secondary-color: #6c757d;
+            --success-color: #28a745;
+            --danger-color: #dc3545;
+            --info-color: #17a2b8;
+            --light-bg: #f8f9fa;
+            --dark-text: #343a40;
+            --border-color: #dee2e6;
+            --header-bg: #343a40;
+            --header-text: #ffffff;
+            --footer-bg: #f8f9fa;
+            --footer-text: #6c757d;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            background-color: var(--light-bg);
+            color: var(--dark-text);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        header {
+            background-color: var(--header-bg);
+            color: var(--header-text);
+            padding: 1rem 2rem;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        header h1 i {
+            margin-right: 10px;
+            color: var(--primary-color);
+        }
+
+        main {
+            flex: 1;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 20px auto;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.05);
+            animation: zoomInEntry 0.6s ease-out forwards; /* Apply animation on load */
+        }
+
+        section {
+            margin-bottom: 30px;
+        }
+
+        h2 {
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+        }
+
+        #video-container {
+            border: 1px solid var(--border-color);
+            background-color: #000; /* Black background for video */
+            padding: 5px;
+            text-align: center;
+            border-radius: 5px;
+            margin-top: 15px;
+            max-width: 800px;
+            margin: auto;
+        }
+
+        #video-feed-status {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+
+        #cameraCombinedStatus {
+            background-color: var(--light-bg);
+            padding: 8px 15px;
+            border-radius: 20px;
+            border: 1px solid var(--border-color);
+        }
+
+        #video-feed {
+            max-width: 100%;
+            height: auto;
+            display: block; /* Remove extra space below image */
+            margin: 0 auto;
+        }
+
+        #action-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+            margin-top: 20px;
+            padding: 15px;
+            background-color: var(--light-bg);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .camera-actions {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            margin-left: 20px;
+            padding: 15px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 1rem;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            transition: all 0.3s ease; /* Enhanced transition */
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* Subtle shadow */
+        }
+        button:hover {
+            transform: translateY(-3px) scale(1.02); /* Lift and slightly enlarge on hover */
+            box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
+        }
+        button:active {
+            transform: translateY(-1px) scale(0.98); /* Press effect */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        button.action { background-color: var(--primary-color); }
+        button.action:hover { background-color: #0056b3; } /* Darken */
+
+        button.start, button.toggle-on { background-color: var(--success-color); }
+        button.start:hover, button.toggle-on:hover { background-color: #218838; } /* Darken */
+
+        button.stop, button.toggle-off { background-color: var(--danger-color); }
+        button.stop:hover, button.toggle-off:hover { background-color: #c82333; } /* Darken */
+
+        #camera-list {
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            width: 100%; /* Ensure it takes full width of its parent */
+            border-top: 1px solid var(--border-color);
+            padding-top: 15px;
+        }
+
+
+        .camera-item {
+            padding: 8px 15px;
+            border: 1px solid var(--primary-color);
+            border-radius: 20px;
+            cursor: pointer;
+            background-color: var(--light-bg);
+            color: var(--primary-color);
+            transition: all 0.2s ease-in-out; /* Smooth transition */
+            font-size: 0.9rem;
+        }
+        .camera-item:hover {
+            background-color: var(--primary-color);
+            color: white;
+            box-shadow: 0 4px 8px rgba(0, 123, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        .camera-item.selected {
+            background-color: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 10px rgba(0, 123, 255, 0.6);
+            transform: scale(1.05); /* Slight pop when selected */
+        }
+        
+        .camera-status-info {
+            margin-top: 15px;
+            font-size: 0.95rem;
+            color: var(--secondary-color);
+            width: 100%;
+            text-align: center;
+        }
+
+        #summary-container {
+            margin-top: 30px;
+            border: 1px solid var(--border-color);
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.03);
+            overflow: hidden; /* For list item animation */
+        }
+        #summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 0.95rem;
+        }
+        #summary-table th, #summary-table td {
+            padding: 12px 15px;
+            border: 1px solid var(--border-color);
+            text-align: left;
+        }
+        #summary-table thead th {
+            background-color: var(--primary-color);
+            color: white;
+            font-weight: bold;
+        }
+        #summary-table tbody tr:nth-child(even) {
+            background-color: var(--light-bg);
+        }
+        #summary-table tbody tr:hover {
+            background-color: #e9ecef; /* Light gray on hover */
+            transition: background-color 0.3s ease;
+        }
+        #summary-table tbody td i {
+            margin-right: 8px;
+            color: var(--info-color);
+        }
+        #summary-table tfoot td {
+            font-style: italic;
+            color: var(--secondary-color);
+            text-align: center;
+        }
+
+        .status-message {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            font-weight: bold;
+            text-align: center;
+            background-color: #e2f0ff;
+            color: var(--primary-color);
+            border: 1px solid #b3d7ff;
+            opacity: 0; /* Start hidden for fade-in */
+            animation: fadeIn 0.5s forwards; /* Apply fade-in animation */
+        }
+        .status-message.error {
+            background-color: #f8d7da;
+            color: var(--danger-color);
+            border-color: #f5c6cb;
+        }
+
+        footer {
+            margin-top: 40px;
+            padding: 1.5rem 2rem;
+            background-color: var(--footer-bg);
+            color: var(--footer-text);
+            text-align: center;
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* Keyframe Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes zoomInEntry {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .team-info {
+            font-size: 0.9rem;
+            color: #ccc;
+            margin-top: 5px;
+        }

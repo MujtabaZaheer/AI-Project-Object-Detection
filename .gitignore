@@ -1,0 +1,18 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.class
+
+# Large files and datasets
+Dataset/
+libs/
+runs/
+
+# Environment
+.venv/
+venv/
+env/
+.env
+
+# Model training outputs
+*.pt
