@@ -83,13 +83,3 @@ Pre-label images:
 ```bash
 python pre_label.py
 ```
-
-## 👥 Contributors
-
-- **Mujtaba Zaheer** (BSE231010)
-- **Ayesha Babar** (BSE231036)
-- **Sameer Sajid** (BSE231035)
-
-## 📄 License
-
-This project is for educational purposes as part of the BSE program.
