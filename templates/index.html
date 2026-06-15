@@ -38,6 +38,8 @@
             </div>
             <div id="video-container">
                 <img id="video-feed" src="" alt="Video Feed">
+                <video id="local-video" autoplay playsinline style="display:none;"></video>
+                <canvas id="local-canvas" width="416" height="312" style="display:none;"></canvas>
             </div>
             <div class="status-message" id="status-message"></div>
         </section>
@@ -64,6 +66,8 @@
         <p>&copy; 2025 YOLO Object Detection System. All rights reserved.</p>
     </footer>
 
+    <!-- Socket.IO client -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
     <!-- Custom JavaScript -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>

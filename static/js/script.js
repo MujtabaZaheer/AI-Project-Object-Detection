@@ -1,106 +1,147 @@
-let currentCameraIndex = 1; // Default
-        let isCameraOn = false;
+const socket = io();
+let localStream = null;
+let frameInterval = null;
+let currentCameraId = '';
+let videoDevices = [];
+let isCameraOn = false;
 
-        /**
-         * Updates the status message display.
-         * @param {string} message - The message to display.
-         * @param {boolean} isError - Whether the message is an error.
-         */
-        function updateStatus(message, isError = false) {
-            const statusDiv = document.getElementById('status-message');
-            statusDiv.textContent = message;
-            statusDiv.className = 'status-message' + (isError ? ' error' : '');
+// Handle Socket.IO connection and response frames
+socket.on('response_frame', function(data) {
+    if (isCameraOn) {
+        document.getElementById('video-feed').src = data;
+    }
+});
 
-            // This is a trick to force a reflow and restart the CSS animation.
-            statusDiv.style.animation = 'none';
-            void statusDiv.offsetWidth; // Trigger reflow
-            statusDiv.style.animation = '';
-        }
-        
-        /** Stops the periodic fetching of the detection summary. */
-        function stopSummaryPolling() {
-            if (window.summaryInterval) {
-                clearInterval(window.summaryInterval);
-                window.summaryInterval = null;
-            }
-        }
+/**
+ * Updates the status message display.
+ * @param {string} message - The message to display.
+ * @param {boolean} isError - Whether the message is an error.
+ */
+function updateStatus(message, isError = false) {
+    const statusDiv = document.getElementById('status-message');
+    statusDiv.textContent = message;
+    statusDiv.className = 'status-message' + (isError ? ' error' : '');
 
-        /** Updates the camera UI elements based on the current state. */
-        function updateCameraUI() {
-            const videoFeed = document.getElementById('video-feed');
-            const cameraToggleButton = document.getElementById('cameraToggleButton');
-            
-            if (isCameraOn) {
-                videoFeed.src = `/video_feed?camera_index=${currentCameraIndex}&_=${new Date().getTime()}`;
-                cameraToggleButton.innerHTML = '<i class="fas fa-power-off"></i> Turn Camera Off (C)';
-                cameraToggleButton.className = 'toggle-on';
-            } else {
-                videoFeed.src = ''; // Clear video feed
-                cameraToggleButton.innerHTML = '<i class="fas fa-power-off"></i> Turn Camera On (C)';
-                cameraToggleButton.className = 'toggle-off';
-                stopSummaryPolling(); // Stop polling when camera is off
-            }
-            updateVideoFeedStatus();
-        }
+    // This is a trick to force a reflow and restart the CSS animation.
+    statusDiv.style.animation = 'none';
+    void statusDiv.offsetWidth; // Trigger reflow
+    statusDiv.style.animation = '';
+}
+
+/** Stops the periodic fetching of the detection summary. */
+function stopSummaryPolling() {
+    if (window.summaryInterval) {
+        clearInterval(window.summaryInterval);
+        window.summaryInterval = null;
+    }
+}
+
+/** Updates the camera UI elements based on the current state. */
+function updateCameraUI() {
+    const videoFeed = document.getElementById('video-feed');
+    const cameraToggleButton = document.getElementById('cameraToggleButton');
+    
+    if (isCameraOn) {
+        cameraToggleButton.innerHTML = '<i class="fas fa-power-off"></i> Turn Camera Off (C)';
+        cameraToggleButton.className = 'toggle-on';
+    } else {
+        videoFeed.src = ''; // Clear video feed
+        cameraToggleButton.innerHTML = '<i class="fas fa-power-off"></i> Turn Camera On (C)';
+        cameraToggleButton.className = 'toggle-off';
+        stopSummaryPolling(); // Stop polling when camera is off
+    }
+    updateVideoFeedStatus();
+}
 
         /** Updates the text indicating camera status and index. */
         function updateVideoFeedStatus() {
             const cameraCombinedStatus = document.getElementById('cameraCombinedStatus');
-            cameraCombinedStatus.textContent = `Camera ${isCameraOn ? 'ON' : 'OFF'} | Index: ${currentCameraIndex}`;
+            let cameraLabel = 'Default';
+            if (currentCameraId && videoDevices.length > 0) {
+                const activeDevice = videoDevices.find(d => d.deviceId === currentCameraId);
+                if (activeDevice) {
+                    cameraLabel = activeDevice.label || 'Custom';
+                }
+            }
+            cameraCombinedStatus.textContent = `Camera ${isCameraOn ? 'ON' : 'OFF'} | Selected: ${cameraLabel}`;
         }
 
-        /** Fetches and displays the list of available cameras. */
+        /** Enumerates and displays the list of available local cameras. */
         async function showCameras() {
             updateStatus('Scanning for cameras...');
-            try {
-                const response = await fetch('/available_cameras');
-                const data = await response.json();
-                const cameraListDiv = document.getElementById('camera-list');
-                cameraListDiv.innerHTML = ''; // Clear previous list
+            const cameraListDiv = document.getElementById('camera-list');
+            cameraListDiv.innerHTML = ''; // Clear previous list
 
-                if (data.cameras && data.cameras.length > 0) {
-                    updateStatus(`Found ${data.cameras.length} camera(s).`);
-                    window.availableCameras = data.cameras;
-                    data.cameras.forEach(index => {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+                updateStatus('Secure context required (HTTPS or localhost) for camera access. Please access via SSH port forwarding.', true);
+                return;
+            }
+
+            try {
+                // Request camera permission temporarily to obtain device labels if not already loaded
+                if (videoDevices.length === 0 || videoDevices.every(d => !d.label)) {
+                    try {
+                        const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        tempStream.getTracks().forEach(track => track.stop());
+                    } catch (e) {
+                        console.log("Could not obtain camera permission for labels yet:", e);
+                    }
+                }
+
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                videoDevices = devices.filter(device => device.kind === 'videoinput');
+
+                if (videoDevices.length > 0) {
+                    updateStatus(`Found ${videoDevices.length} camera(s).`);
+                    videoDevices.forEach((device, index) => {
                         const cameraItem = document.createElement('span');
                         cameraItem.className = 'camera-item';
-                        if (index === currentCameraIndex) {
+                        
+                        if (!currentCameraId && index === 0) {
+                            currentCameraId = device.deviceId;
+                        }
+
+                        if (device.deviceId === currentCameraId) {
                             cameraItem.classList.add('selected');
                         }
-                        cameraItem.textContent = `Camera ${index}`;
-                        cameraItem.onclick = () => selectCamera(index);
+                        cameraItem.textContent = device.label || `Camera ${index + 1}`;
+                        cameraItem.onclick = () => selectCamera(device.deviceId);
                         cameraListDiv.appendChild(cameraItem);
                     });
                 } else {
                     updateStatus('No cameras found.', true);
                 }
             } catch (error) {
-                updateStatus('Error scanning for cameras.', true);
+                updateStatus('Error scanning for cameras: ' + error.message, true);
                 console.error('Error scanning for cameras:', error);
             }
         }
 
         /**
          * Selects a camera and updates the UI.
-         * @param {number} index - The index of the camera to select.
+         * @param {string} deviceId - The deviceId of the camera to select.
          */
-        function selectCamera(index) {
-            if (!window.availableCameras || !window.availableCameras.includes(index)) {
-                updateStatus(`Camera index ${index} is not available.`, true);
-                return;
-            }
-            currentCameraIndex = index;
-            document.querySelectorAll('.camera-item').forEach(item => {
-                item.classList.remove('selected');
-                if (parseInt(item.textContent.replace('Camera ', '')) === index) {
-                    item.classList.add('selected');
+        function selectCamera(deviceId) {
+            currentCameraId = deviceId;
+            updateStatus('Selected camera.');
+
+            // Re-render the camera list UI to update the 'selected' class
+            const cameraListDiv = document.getElementById('camera-list');
+            cameraListDiv.innerHTML = '';
+            videoDevices.forEach((device, index) => {
+                const cameraItem = document.createElement('span');
+                cameraItem.className = 'camera-item';
+                if (device.deviceId === currentCameraId) {
+                    cameraItem.classList.add('selected');
                 }
+                cameraItem.textContent = device.label || `Camera ${index + 1}`;
+                cameraItem.onclick = () => selectCamera(device.deviceId);
+                cameraListDiv.appendChild(cameraItem);
             });
-            updateStatus(`Selected Camera Index: ${index}`);
+
             updateVideoFeedStatus(); // Update status text immediately
 
             // If the camera is on, we need to restart the stream to switch.
-            // This is done by turning it off and then on again.
             if (isCameraOn) {
                 toggleCamera(false); // Turn off
                 setTimeout(() => toggleCamera(true), 500); // Turn on after a short delay
@@ -113,26 +154,82 @@ let currentCameraIndex = 1; // Default
          */
         async function toggleCamera(forceState = null) {
             let targetState = forceState !== null ? forceState : !isCameraOn;
-            let endpoint = targetState ? `/camera_on/${currentCameraIndex}` : '/camera_off';
             let actionText = targetState ? 'Turning ON' : 'Turning OFF';
 
             updateStatus(`${actionText} camera...`);
-            try {
-                const response = await fetch(endpoint);
-                const data = await response.json();
-                isCameraOn = targetState;
-                updateStatus(data.status);
-                updateCameraUI();
-                
-                const summaryTableBody = document.querySelector('#summary-table tbody');
-                summaryTableBody.innerHTML = '<tr><td><i class="fas fa-box"></i> Detection not active.</td></tr>';
-                
-                if (!isCameraOn) {
-                    stopSummaryPolling(); // Ensure polling stops if camera is turned off
+            
+            const localVideo = document.getElementById('local-video');
+            const localCanvas = document.getElementById('local-canvas');
+            const canvasContext = localCanvas ? localCanvas.getContext('2d') : null;
+
+            if (targetState) {
+                try {
+                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                        throw new Error("Secure context required (HTTPS or localhost) for camera access. Please access via SSH port forwarding (http://localhost:5000) or configure browser flags.");
+                    }
+
+                    const constraints = {
+                        video: {
+                            deviceId: currentCameraId ? { exact: currentCameraId } : undefined,
+                            width: { ideal: 416 },
+                            height: { ideal: 312 }
+                        }
+                    };
+                    
+                    localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                    if (localVideo) {
+                        localVideo.srcObject = localStream;
+                        localVideo.onloadedmetadata = () => {
+                            localVideo.play();
+                        };
+                    }
+
+                    isCameraOn = true;
+                    updateStatus('Camera turned ON');
+                    updateCameraUI();
+                    
+                    const summaryTableBody = document.querySelector('#summary-table tbody');
+                    if (summaryTableBody) {
+                        summaryTableBody.innerHTML = '<tr><td><i class="fas fa-box"></i> Detection not active.</td></tr>';
+                    }
+                    
+                    if (frameInterval) {
+                        clearInterval(frameInterval);
+                    }
+                    
+                    frameInterval = setInterval(() => {
+                        if (localVideo && localVideo.readyState === localVideo.HAVE_ENOUGH_DATA && localCanvas && canvasContext) {
+                            canvasContext.drawImage(localVideo, 0, 0, localCanvas.width, localCanvas.height);
+                            const dataUrl = localCanvas.toDataURL('image/jpeg', 0.65);
+                            socket.emit('video_frame', dataUrl);
+                        }
+                    }, 50); // ~20 FPS
+
+                } catch (error) {
+                    isCameraOn = false;
+                    updateStatus('Error: ' + error.message, true);
+                    console.error('Error turning on camera:', error);
+                    updateCameraUI();
                 }
-            } catch (error) {
-                updateStatus(`Error ${actionText.toLowerCase()} camera.`, true);
-                console.error(`Error ${actionText.toLowerCase()} camera:`, error);
+            } else {
+                isCameraOn = false;
+                
+                if (frameInterval) {
+                    clearInterval(frameInterval);
+                    frameInterval = null;
+                }
+                
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                    localStream = null;
+                }
+                
+                if (localVideo) {
+                    localVideo.srcObject = null;
+                }
+                
+                updateStatus('Camera turned OFF');
+                updateCameraUI();
             }
         }
 
@@ -236,6 +333,11 @@ let currentCameraIndex = 1; // Default
                 showCameras();
             } else if (!isNaN(event.key) && event.key.trim() !== '') {
                 event.preventDefault();
-                selectCamera(parseInt(event.key));
+                const camIndex = parseInt(event.key) - 1;
+                if (videoDevices[camIndex]) {
+                    selectCamera(videoDevices[camIndex].deviceId);
+                } else {
+                    updateStatus(`Camera index ${event.key} not available.`, true);
+                }
             }
         });

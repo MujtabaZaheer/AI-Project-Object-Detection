@@ -37,6 +37,9 @@ def handle_video_frame(data):
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
         if frame is not None:
+            # Mirror the frame to preserve your original layout preview format (flip horizontally)
+            frame = cv2.flip(frame, 1)
+
             # Run inference if user clicked 'Start Detection'
             if detection_active and model:
                 results = model(frame)
@@ -45,9 +48,6 @@ def handle_video_frame(data):
                 for c in results[0].boxes.cls:
                     label = results[0].names[int(c)]
                     detected_items_summary.add(label)
-
-            # Mirror the frame to preserve your original layout preview format
-            frame = cv2.flip(frame, 1)
 
             # Encode processed frame back to standard string transmission layout
             _, buffer = cv2.imencode('.jpg', frame)
