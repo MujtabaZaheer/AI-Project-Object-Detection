@@ -1,0 +1,600 @@
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 0000000..e9440e5
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,27 @@
++FROM python:3.10-slim
++
++WORKDIR /app
++
++# 1. Install system prerequisites
++RUN apt-get update && apt-get install -y \
++    libglib2.0-0 \
++    && rm -rf /var/lib/apt/lists/*
++
++# 2. Upgrade pip
++RUN pip install --no-cache-dir --upgrade pip
++
++# 3. FIX: Install MATCHING torch and torchvision CPU versions together
++RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
++
++# 4. Install the web routing framework and headless YOLO components
++RUN pip install --no-cache-dir flask flask-socketio ultralytics-opencv-headless
++
++# 5. Move project files in place
++COPY app.py .
++COPY customYolo.pt .
++COPY static/ ./static
++COPY templates/ ./templates
++
++EXPOSE 5000
++
++CMD ["python", "app.py"]
+diff --git a/app.py b/app.py
+index 7d23b6e..1f1e063 100644
+--- a/app.py
++++ b/app.py
+@@ -1,100 +1,74 @@
+-import sys
+ import os
+-sys.path.append(os.path.join(os.path.dirname(__file__), 'libs'))
+-
+-from flask import Flask, render_template, Response, jsonify
++import base64
+ import cv2
++import numpy as np
++from flask import Flask, render_template, jsonify
++from flask_socketio import SocketIO, emit
+ from ultralytics import YOLO
+ 
+ app = Flask(__name__)
++app.config['SECRET_KEY'] = 'yolo_secret_key_bse'
++# Initialize SocketIO with cross-origin allowance for cloud traffic
++socketio = SocketIO(app, cors_allowed_origins="*")
+ 
+-camera = None
+-current_camera_index = 1
+-is_camera_active = False
+ model = None
+ detection_active = False
+ detected_items_summary = set()
+ 
+-print("Loading Your Object Detection) Model... please wait.")
++print("Loading Your Object Detection Model... please wait.")
+ try:
+     model = YOLO('customYolo.pt')
+     print("Model loaded successfully on CPU!")
+ except Exception as e:
+-    print(f"Critical Error loading YOLO model: {e}.")
++    print(f"Critical Error loading YOLO model: {e}")
+     exit()
+ 
+-def get_available_cameras():
+-    camera_indices = []
+-    for i in range(5):
+-        cap = cv2.VideoCapture(i)
+-        if cap.isOpened():
+-            cap.release()
+-            camera_indices.append(i)
+-    return camera_indices
+-
+-def get_camera_feed():
+-    global detection_active, detected_items_summary, camera, is_camera_active, current_camera_index
+-
+-    if not is_camera_active:
+-        return
+-
+-    if camera is None or not camera.isOpened():
+-        camera = cv2.VideoCapture(current_camera_index)
+-        if not camera.isOpened():
+-            print(f"Error: Could not open video stream from camera {current_camera_index}.")
+-            is_camera_active = False
+-            return
+-
+-    while is_camera_active:
+-        ret, frame = camera.read()
+-        if not ret:
+-            print("Failed to grab frame. The camera may have been disconnected.")
+-            is_camera_active = False 
+-            break
+-
+-        frame = cv2.flip(frame, 1)
+-
+-        if detection_active and model:
+-            results = model(frame)
+-            annotated_frame = results[0].plot()
+-            for c in results[0].boxes.cls:
+-                label = results[0].names[int(c)]
+-                detected_items_summary.add(label)
+-            frame = annotated_frame
+-        
+-        ret, buffer = cv2.imencode('.jpg', frame)
+-        if ret:
+-            frame_bytes = buffer.tobytes()
+-        
+-            yield (b'--frame\r\n'
+-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+-
+-    if camera is not None:
+-        camera.release()
+-        camera = None
+-    print("Camera stream stopped and camera released.")
+-
+ @app.route('/')
+ def index():
+     return render_template('index.html')
+ 
+-@app.route('/video_feed')
+-def video_feed():
+-    return Response(get_camera_feed(), mimetype='multipart/x-mixed-replace; boundary=frame')
++@socketio.on('video_frame')
++def handle_video_frame(data):
++    global detection_active, detected_items_summary
++    try:
++        # Decode base64 image chunk sent from client browser
++        encoded_data = data.split(',')[1]
++        nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
++        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
++
++        if frame is not None:
++            # Mirror the frame to preserve your original layout preview format (flip horizontally)
++            frame = cv2.flip(frame, 1)
++
++            # Run inference if user clicked 'Start Detection'
++            if detection_active and model:
++                results = model(frame)
++                frame = results[0].plot() # Overwrite with bounding box canvas
++                
++                for c in results[0].boxes.cls:
++                    label = results[0].names[int(c)]
++                    detected_items_summary.add(label)
++
++            # Encode processed frame back to standard string transmission layout
++            _, buffer = cv2.imencode('.jpg', frame)
++            b64_frame = base64.b64encode(buffer).decode('utf-8')
++            
++            # Emit back down to the local browser window view context
++            emit('response_frame', 'data:image/jpeg;base64,' + b64_frame)
++    except Exception as e:
++        pass
+ 
+ @app.route('/start_detection')
+-def start_detection():
++def start_detection_route():
+     global detection_active, detected_items_summary
+     detection_active = True
+     detected_items_summary = set()
+-    print("Detection Started!")
+     return jsonify(status="Detection started")
+ 
+ @app.route('/stop_detection')
+-def stop_detection():
++def stop_detection_route():
+     global detection_active
+     detection_active = False
+-    print("Detection Stopped!")
+     return jsonify(status="Detection stopped", summary=list(detected_items_summary))
+ 
+ @app.route('/summary')
+@@ -103,29 +77,8 @@ def get_summary():
+ 
+ @app.route('/available_cameras')
+ def available_cameras():
+-    cameras = get_available_cameras()
+-    return jsonify(cameras=cameras)
+-
+-@app.route('/camera_on/<int:index>')
+-def camera_on(index):
+-    global is_camera_active, current_camera_index, camera
+-    if camera is not None:
+-        camera.release()
+-        camera = None
+-    current_camera_index = index
+-    is_camera_active = True
+-    print(f"Camera {current_camera_index} turned ON.")
+-    return jsonify(status=f"Camera {current_camera_index} turned ON")
+-
+-@app.route('/camera_off')
+-def camera_off():
+-    global is_camera_active, camera
+-    is_camera_active = False
+-    if camera is not None:
+-        camera.release()
+-        camera = None
+-    print("Camera turned OFF.")
+-    return jsonify(status="Camera turned OFF")
++    # Mocking single-client local browser web-camera stream index visibility mapping
++    return jsonify(cameras=[0])
+ 
+ if __name__ == '__main__':
+-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
++    socketio.run(app, host='0.0.0.0', port=5000, debug=True, allow_unsafe_werkzeug=True)
+diff --git a/static/js/script.js b/static/js/script.js
+index 6a043b2..bf98563 100644
+--- a/static/js/script.js
++++ b/static/js/script.js
+@@ -1,106 +1,147 @@
+-let currentCameraIndex = 1; // Default
+-        let isCameraOn = false;
++const socket = io();
++let localStream = null;
++let frameInterval = null;
++let currentCameraId = '';
++let videoDevices = [];
++let isCameraOn = false;
+ 
+-        /**
+-         * Updates the status message display.
+-         * @param {string} message - The message to display.
+-         * @param {boolean} isError - Whether the message is an error.
+-         */
+-        function updateStatus(message, isError = false) {
+-            const statusDiv = document.getElementById('status-message');
+-            statusDiv.textContent = message;
+-            statusDiv.className = 'status-message' + (isError ? ' error' : '');
+-
+-            // This is a trick to force a reflow and restart the CSS animation.
+-            statusDiv.style.animation = 'none';
+-            void statusDiv.offsetWidth; // Trigger reflow
+-            statusDiv.style.animation = '';
+-        }
+-        
+-        /** Stops the periodic fetching of the detection summary. */
+-        function stopSummaryPolling() {
+-            if (window.summaryInterval) {
+-                clearInterval(window.summaryInterval);
+-                window.summaryInterval = null;
+-            }
+-        }
++// Handle Socket.IO connection and response frames
++socket.on('response_frame', function(data) {
++    if (isCameraOn) {
++        document.getElementById('video-feed').src = data;
++    }
++});
+ 
+-        /** Updates the camera UI elements based on the current state. */
+-        function updateCameraUI() {
+-            const videoFeed = document.getElementById('video-feed');
+-            const cameraToggleButton = document.getElementById('cameraToggleButton');
+-            
+-            if (isCameraOn) {
+-                videoFeed.src = `/video_feed?camera_index=${currentCameraIndex}&_=${new Date().getTime()}`;
+-                cameraToggleButton.innerHTML = '<i class="fas fa-power-off"></i> Turn Camera Off (C)';
+-                cameraToggleButton.className = 'toggle-on';
+-            } else {
+-                videoFeed.src = ''; // Clear video feed
+-                cameraToggleButton.innerHTML = '<i class="fas fa-power-off"></i> Turn Camera On (C)';
+-                cameraToggleButton.className = 'toggle-off';
+-                stopSummaryPolling(); // Stop polling when camera is off
+-            }
+-            updateVideoFeedStatus();
+-        }
++/**
++ * Updates the status message display.
++ * @param {string} message - The message to display.
++ * @param {boolean} isError - Whether the message is an error.
++ */
++function updateStatus(message, isError = false) {
++    const statusDiv = document.getElementById('status-message');
++    statusDiv.textContent = message;
++    statusDiv.className = 'status-message' + (isError ? ' error' : '');
++
++    // This is a trick to force a reflow and restart the CSS animation.
++    statusDiv.style.animation = 'none';
++    void statusDiv.offsetWidth; // Trigger reflow
++    statusDiv.style.animation = '';
++}
++
++/** Stops the periodic fetching of the detection summary. */
++function stopSummaryPolling() {
++    if (window.summaryInterval) {
++        clearInterval(window.summaryInterval);
++        window.summaryInterval = null;
++    }
++}
++
++/** Updates the camera UI elements based on the current state. */
++function updateCameraUI() {
++    const videoFeed = document.getElementById('video-feed');
++    const cameraToggleButton = document.getElementById('cameraToggleButton');
++    
++    if (isCameraOn) {
++        cameraToggleButton.innerHTML = '<i class="fas fa-power-off"></i> Turn Camera Off (C)';
++        cameraToggleButton.className = 'toggle-on';
++    } else {
++        videoFeed.src = ''; // Clear video feed
++        cameraToggleButton.innerHTML = '<i class="fas fa-power-off"></i> Turn Camera On (C)';
++        cameraToggleButton.className = 'toggle-off';
++        stopSummaryPolling(); // Stop polling when camera is off
++    }
++    updateVideoFeedStatus();
++}
+ 
+         /** Updates the text indicating camera status and index. */
+         function updateVideoFeedStatus() {
+             const cameraCombinedStatus = document.getElementById('cameraCombinedStatus');
+-            cameraCombinedStatus.textContent = `Camera ${isCameraOn ? 'ON' : 'OFF'} | Index: ${currentCameraIndex}`;
++            let cameraLabel = 'Default';
++            if (currentCameraId && videoDevices.length > 0) {
++                const activeDevice = videoDevices.find(d => d.deviceId === currentCameraId);
++                if (activeDevice) {
++                    cameraLabel = activeDevice.label || 'Custom';
++                }
++            }
++            cameraCombinedStatus.textContent = `Camera ${isCameraOn ? 'ON' : 'OFF'} | Selected: ${cameraLabel}`;
+         }
+ 
+-        /** Fetches and displays the list of available cameras. */
++        /** Enumerates and displays the list of available local cameras. */
+         async function showCameras() {
+             updateStatus('Scanning for cameras...');
++            const cameraListDiv = document.getElementById('camera-list');
++            cameraListDiv.innerHTML = ''; // Clear previous list
++
++            if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
++                updateStatus('Secure context required (HTTPS or localhost) for camera access. Please access via SSH port forwarding.', true);
++                return;
++            }
++
+             try {
+-                const response = await fetch('/available_cameras');
+-                const data = await response.json();
+-                const cameraListDiv = document.getElementById('camera-list');
+-                cameraListDiv.innerHTML = ''; // Clear previous list
++                // Request camera permission temporarily to obtain device labels if not already loaded
++                if (videoDevices.length === 0 || videoDevices.every(d => !d.label)) {
++                    try {
++                        const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
++                        tempStream.getTracks().forEach(track => track.stop());
++                    } catch (e) {
++                        console.log("Could not obtain camera permission for labels yet:", e);
++                    }
++                }
++
++                const devices = await navigator.mediaDevices.enumerateDevices();
++                videoDevices = devices.filter(device => device.kind === 'videoinput');
+ 
+-                if (data.cameras && data.cameras.length > 0) {
+-                    updateStatus(`Found ${data.cameras.length} camera(s).`);
+-                    window.availableCameras = data.cameras;
+-                    data.cameras.forEach(index => {
++                if (videoDevices.length > 0) {
++                    updateStatus(`Found ${videoDevices.length} camera(s).`);
++                    videoDevices.forEach((device, index) => {
+                         const cameraItem = document.createElement('span');
+                         cameraItem.className = 'camera-item';
+-                        if (index === currentCameraIndex) {
++                        
++                        if (!currentCameraId && index === 0) {
++                            currentCameraId = device.deviceId;
++                        }
++
++                        if (device.deviceId === currentCameraId) {
+                             cameraItem.classList.add('selected');
+                         }
+-                        cameraItem.textContent = `Camera ${index}`;
+-                        cameraItem.onclick = () => selectCamera(index);
++                        cameraItem.textContent = device.label || `Camera ${index + 1}`;
++                        cameraItem.onclick = () => selectCamera(device.deviceId);
+                         cameraListDiv.appendChild(cameraItem);
+                     });
+                 } else {
+                     updateStatus('No cameras found.', true);
+                 }
+             } catch (error) {
+-                updateStatus('Error scanning for cameras.', true);
++                updateStatus('Error scanning for cameras: ' + error.message, true);
+                 console.error('Error scanning for cameras:', error);
+             }
+         }
+ 
+         /**
+          * Selects a camera and updates the UI.
+-         * @param {number} index - The index of the camera to select.
++         * @param {string} deviceId - The deviceId of the camera to select.
+          */
+-        function selectCamera(index) {
+-            if (!window.availableCameras || !window.availableCameras.includes(index)) {
+-                updateStatus(`Camera index ${index} is not available.`, true);
+-                return;
+-            }
+-            currentCameraIndex = index;
+-            document.querySelectorAll('.camera-item').forEach(item => {
+-                item.classList.remove('selected');
+-                if (parseInt(item.textContent.replace('Camera ', '')) === index) {
+-                    item.classList.add('selected');
++        function selectCamera(deviceId) {
++            currentCameraId = deviceId;
++            updateStatus('Selected camera.');
++
++            // Re-render the camera list UI to update the 'selected' class
++            const cameraListDiv = document.getElementById('camera-list');
++            cameraListDiv.innerHTML = '';
++            videoDevices.forEach((device, index) => {
++                const cameraItem = document.createElement('span');
++                cameraItem.className = 'camera-item';
++                if (device.deviceId === currentCameraId) {
++                    cameraItem.classList.add('selected');
+                 }
++                cameraItem.textContent = device.label || `Camera ${index + 1}`;
++                cameraItem.onclick = () => selectCamera(device.deviceId);
++                cameraListDiv.appendChild(cameraItem);
+             });
+-            updateStatus(`Selected Camera Index: ${index}`);
++
+             updateVideoFeedStatus(); // Update status text immediately
+ 
+             // If the camera is on, we need to restart the stream to switch.
+-            // This is done by turning it off and then on again.
+             if (isCameraOn) {
+                 toggleCamera(false); // Turn off
+                 setTimeout(() => toggleCamera(true), 500); // Turn on after a short delay
+@@ -113,26 +154,82 @@ let currentCameraIndex = 1; // Default
+          */
+         async function toggleCamera(forceState = null) {
+             let targetState = forceState !== null ? forceState : !isCameraOn;
+-            let endpoint = targetState ? `/camera_on/${currentCameraIndex}` : '/camera_off';
+             let actionText = targetState ? 'Turning ON' : 'Turning OFF';
+ 
+             updateStatus(`${actionText} camera...`);
+-            try {
+-                const response = await fetch(endpoint);
+-                const data = await response.json();
+-                isCameraOn = targetState;
+-                updateStatus(data.status);
+-                updateCameraUI();
++            
++            const localVideo = document.getElementById('local-video');
++            const localCanvas = document.getElementById('local-canvas');
++            const canvasContext = localCanvas ? localCanvas.getContext('2d') : null;
++
++            if (targetState) {
++                try {
++                    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
++                        throw new Error("Secure context required (HTTPS or localhost) for camera access. Please access via SSH port forwarding (http://localhost:5000) or configure browser flags.");
++                    }
++
++                    const constraints = {
++                        video: {
++                            deviceId: currentCameraId ? { exact: currentCameraId } : undefined,
++                            width: { ideal: 416 },
++                            height: { ideal: 312 }
++                        }
++                    };
++                    
++                    localStream = await navigator.mediaDevices.getUserMedia(constraints);
++                    if (localVideo) {
++                        localVideo.srcObject = localStream;
++                        localVideo.onloadedmetadata = () => {
++                            localVideo.play();
++                        };
++                    }
++
++                    isCameraOn = true;
++                    updateStatus('Camera turned ON');
++                    updateCameraUI();
++                    
++                    const summaryTableBody = document.querySelector('#summary-table tbody');
++                    if (summaryTableBody) {
++                        summaryTableBody.innerHTML = '<tr><td><i class="fas fa-box"></i> Detection not active.</td></tr>';
++                    }
++                    
++                    if (frameInterval) {
++                        clearInterval(frameInterval);
++                    }
++                    
++                    frameInterval = setInterval(() => {
++                        if (localVideo && localVideo.readyState === localVideo.HAVE_ENOUGH_DATA && localCanvas && canvasContext) {
++                            canvasContext.drawImage(localVideo, 0, 0, localCanvas.width, localCanvas.height);
++                            const dataUrl = localCanvas.toDataURL('image/jpeg', 0.65);
++                            socket.emit('video_frame', dataUrl);
++                        }
++                    }, 50); // ~20 FPS
++
++                } catch (error) {
++                    isCameraOn = false;
++                    updateStatus('Error: ' + error.message, true);
++                    console.error('Error turning on camera:', error);
++                    updateCameraUI();
++                }
++            } else {
++                isCameraOn = false;
+                 
+-                const summaryTableBody = document.querySelector('#summary-table tbody');
+-                summaryTableBody.innerHTML = '<tr><td><i class="fas fa-box"></i> Detection not active.</td></tr>';
++                if (frameInterval) {
++                    clearInterval(frameInterval);
++                    frameInterval = null;
++                }
+                 
+-                if (!isCameraOn) {
+-                    stopSummaryPolling(); // Ensure polling stops if camera is turned off
++                if (localStream) {
++                    localStream.getTracks().forEach(track => track.stop());
++                    localStream = null;
+                 }
+-            } catch (error) {
+-                updateStatus(`Error ${actionText.toLowerCase()} camera.`, true);
+-                console.error(`Error ${actionText.toLowerCase()} camera:`, error);
++                
++                if (localVideo) {
++                    localVideo.srcObject = null;
++                }
++                
++                updateStatus('Camera turned OFF');
++                updateCameraUI();
+             }
+         }
+ 
+@@ -236,6 +333,11 @@ let currentCameraIndex = 1; // Default
+                 showCameras();
+             } else if (!isNaN(event.key) && event.key.trim() !== '') {
+                 event.preventDefault();
+-                selectCamera(parseInt(event.key));
++                const camIndex = parseInt(event.key) - 1;
++                if (videoDevices[camIndex]) {
++                    selectCamera(videoDevices[camIndex].deviceId);
++                } else {
++                    updateStatus(`Camera index ${event.key} not available.`, true);
++                }
+             }
+         });
+\ No newline at end of file
+diff --git a/templates/index.html b/templates/index.html
+index 41e468f..a213757 100644
+--- a/templates/index.html
++++ b/templates/index.html
+@@ -38,6 +38,8 @@
+             </div>
+             <div id="video-container">
+                 <img id="video-feed" src="" alt="Video Feed">
++                <video id="local-video" autoplay playsinline style="display:none;"></video>
++                <canvas id="local-canvas" width="416" height="312" style="display:none;"></canvas>
+             </div>
+             <div class="status-message" id="status-message"></div>
+         </section>
+@@ -64,6 +66,8 @@
+         <p>&copy; 2025 YOLO Object Detection System. All rights reserved.</p>
+     </footer>
+ 
++    <!-- Socket.IO client -->
++    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+     <!-- Custom JavaScript -->
+     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+ </body>
+diff --git a/yolo-key.pem b/yolo-key.pem
+new file mode 100644
+index 0000000..7ff4146
+--- /dev/null
++++ b/yolo-key.pem
+@@ -0,0 +1,27 @@
++-----BEGIN RSA PRIVATE KEY-----
++MIIEpQIBAAKCAQEAwIJPjgg0fb881DK6fj8ZPpdbvptORWS7zm1hYx4+IsYPoWOK
++b1wXIIed2Dye42XDGleYS9EbBby1lDSv6e4PhFVfp8lhtwjlghxUPfpMTX4yWR5t
++EcgYsEl5sQ+DPKh9wlL56RjNPqSc52AbziwCzVDriCXqtcJ1mkPtJ8LDiXeB4QZc
++EMfxkolWfXC/teR/qlyJHbw08BpJVoegmcidFnlvwbfSxXI0xLvNCX7aAXylyz0U
++7dHDgJAmkCwZb+zGnyFyDSDbhqKtqdD37NwJCILc4UjI0pkY9pDyCM75+9N9NyLO
++rA6AVZMba7+VyN6y9K1/6mNMWaiMKZZ838BOZwIDAQABAoIBAQC0HbhdhaPHO5So
++XcZLtLHj9C3sytaS6sslOwXxfSxZ0MJzF/VAeANTdk/jL+ThkibXkLl3xm/oEEY8
++Ioes8gYmpNJY5Hy+il5iPCs9yeB2aOqmo2cdSgB/gF+RoJgDuwnfNU+KHqB6Sf5c
++JXoejuMYQuv8eK1/3i+2ZHORzhKxnDJpWrY/9Rvj/XsI1SrtaR9846m/RxpN0i4+
++isdmufYX0aBCunjyfHf1IZfkQH0vIylhJw9U/I456Xbw9McnPvtFIWBpSzVNcQGl
++Om0irKxMJkztMM9RXjP0eVDVmQMHynk8Mro/mgHaNMOLHEc7+lDDOIB+rOlc+0r5
++QKBMbfKRAoGBAPwipMGj2G7UxHhvmL28fDWgIv5Kjf6XPGmKF2Tl9SH07UOiyJBN
++lWYri5k7rhE8k/9Q3vmii1XsmrWFa/v8NUD4LwhOtummTIeQcgtDN+0l2V533HO6
++qDvOQ2KxNPjQwdStJhazvevJwXGeeKT6rab9YSW+GnccMcTikuQMA2kNAoGBAMN1
++suy4MAw+OgmW1wgiUl3wD0fc8CHnFrhb4ro7EoLUoRrxjuDA5tM3slK5bozErG22
++xwNN9tkqJmKckPAFIUvv45orpiUs667R0fFovw7yrLqkUPNuo9jc3VLCf3DclxgT
++CNL7BwURlyPJSV543Z6iWWvJUMHCm+Tb3qActxBDAoGBAMcd5Nc3ubjtNquWFh3h
++OIZxDLGd1z1z2jXO5GK+aDSE5MtBRvsPCilBwmElDHZ4TLiY+T5T643T6OnpkDnU
++F4pTdXEuGK20s0NsA2R5lTUnat578hFDG5D/d5/9KkRFOI3on+fV0ureznIYIFbJ
++0VHLUGkqFGR0U6mU9UQ7aIYRAoGAaccplJg9UHLgn83lAz7nynSfIGn9/qr8DbuU
++YOqVIv6FTXqKszFR+d67f69gl4fcNOfknfI0c+Qur9FBUtPD6D+jsgyLNrUvuwVM
++E9R3CVTli4BfWs52l2c305D0vRR0JJAwh1VYwDJ7098b+Kd6cF41/HIPZTy3d0xS
++F95SZ9cCgYEA9bK6U0MPm7xuZ+w2L3Ty7IWu0l6GFpGNhXnE7eU9E7vycoz/X1my
++KnNTJBAGMhSrubWtTJCYHtdZKmX2VCEJkr/5cyr79PxJk9+lDQJCTmheqvALeSLV
++LETq2PhphU/KV1pNX4t5G5wd47kYzixlqD+js34ZO+64Ot88HPxuLm0=
++-----END RSA PRIVATE KEY-----
+\ No newline at end of file

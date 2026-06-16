@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,21 +10,26 @@
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
+
 <body>
     <header>
         <h1><i class="fas fa-video"></i> YOLO Object Detection System</h1>
-        <p class="team-info">Mujtaba Zaheer BSE231010, Ayesha Babar BSE231036, Sameer Sajid BSE231035</p>
+        <p class="team-info">Mujtaba Zaheer - Ayesha Babar - Aaiza Islam - Qasim Ali Shah</p>
     </header>
 
     <main>
         <section id="actions-section">
             <h2><i class="fas fa-keyboard"></i> Actions</h2>
             <div id="action-buttons">
-                <button class="action" onclick="startDetection()"><i class="fas fa-play"></i> Start Detection (Space)</button>
-                <button class="action" onclick="stopDetection()"><i class="fas fa-stop"></i> Stop Detection (Esc)</button>
-                <button class="action" onclick="showCameras()"><i class="fas fa-search"></i> Scan for Cameras (S)</button>
+                <button class="action" onclick="startDetection()"><i class="fas fa-play"></i> Start Detection
+                    (Space)</button>
+                <button class="action" onclick="stopDetection()"><i class="fas fa-stop"></i> Stop Detection
+                    (Esc)</button>
+                <button class="action" onclick="showCameras()"><i class="fas fa-search"></i> Scan for Cameras
+                    (S)</button>
                 <div class="camera-actions">
-                    <button id="cameraToggleButton" class="toggle-off" onclick="toggleCamera()"><i class="fas fa-power-off"></i> Turn Camera On (C)</button>
+                    <button id="cameraToggleButton" class="toggle-off" onclick="toggleCamera()"><i
+                            class="fas fa-power-off"></i> Turn Camera On (C)</button>
                     <div id="camera-list">
                         <!-- Cameras will be listed here dynamically -->
                     </div>
@@ -54,7 +60,9 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <tr><td>Detection not active.</td></tr>
+                        <tr>
+                            <td>Detection not active.</td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -71,4 +79,5 @@
     <!-- Custom JavaScript -->
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
 </body>
+
 </html>
